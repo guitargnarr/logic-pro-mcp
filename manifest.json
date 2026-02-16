@@ -1,0 +1,43 @@
+{
+  "name": "logic-pro-mcp",
+  "display_name": "Logic Pro MCP Server",
+  "description": "Bidirectional, stateful control of Logic Pro from AI assistants. 8 dispatcher tools + 7 resources across 5 native macOS channels.",
+  "version": "0.1.0",
+  "author": "Kolton Jacobs",
+  "license": "MIT",
+  "homepage": "https://github.com/anthropics/logic-pro-mcp",
+  "repository": "https://github.com/anthropics/logic-pro-mcp",
+  "platforms": ["macos"],
+  "runtime": "native",
+  "installation": {
+    "macos": {
+      "command": "LogicProMCP",
+      "args": [],
+      "download_url": "https://github.com/anthropics/logic-pro-mcp/releases/latest/download/LogicProMCP",
+      "install_path": "/usr/local/bin/LogicProMCP"
+    }
+  },
+  "permissions": [
+    "accessibility",
+    "automation"
+  ],
+  "tools": [
+    "logic_transport",
+    "logic_tracks",
+    "logic_mixer",
+    "logic_midi",
+    "logic_edit",
+    "logic_navigate",
+    "logic_project",
+    "logic_system"
+  ],
+  "resources": [
+    "logic://transport/state",
+    "logic://tracks",
+    "logic://tracks/{index}",
+    "logic://mixer",
+    "logic://project/info",
+    "logic://midi/ports",
+    "logic://system/health"
+  ]
+}

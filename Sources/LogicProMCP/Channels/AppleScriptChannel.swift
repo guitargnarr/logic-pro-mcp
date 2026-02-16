@@ -1,0 +1,146 @@
+import Foundation
+
+/// Channel that controls Logic Pro via AppleScript.
+/// Very narrow scope: app lifecycle operations only (new, open, close project).
+/// AppleScript is slow and modal, so it is used only when no better channel exists.
+actor AppleScriptChannel: Channel {
+    let id: ChannelID = .appleScript
+
+    func start() async throws {
+        Log.info("AppleScript channel started", subsystem: "appleScript")
+    }
+
+    func stop() async {
+        Log.info("AppleScript channel stopped", subsystem: "appleScript")
+    }
+
+    func execute(operation: String, params: [String: String]) async -> ChannelResult {
+        switch operation {
+        case "project.new":
+            return await runScript(newProjectScript())
+
+        case "project.open":
+            guard let path = params["path"] else {
+                return .error("Missing 'path' parameter for project.open")
+            }
+            return await runScript(openProjectScript(path: path))
+
+        case "project.close":
+            let saving = params["saving"] ?? "yes"
+            return await runScript(closeProjectScript(saving: saving))
+
+        case "project.save":
+            return await runScript(saveProjectScript())
+
+        // Transport fallbacks (AppleScript is last resort for these)
+        case "transport.play":
+            return await runScript(transportScript(action: "play"))
+        case "transport.stop":
+            return await runScript(transportScript(action: "stop"))
+        case "transport.record":
+            return await runScript(transportScript(action: "record"))
+        case "transport.pause":
+            return await runScript(transportScript(action: "pause"))
+
+        default:
+            return .error("Unsupported AppleScript operation: \(operation)")
+        }
+    }
+
+    func healthCheck() async -> ChannelHealth {
+        guard ProcessUtils.isLogicProRunning else {
+            return .unavailable("Logic Pro is not running")
+        }
+        return .healthy(detail: "AppleScript ready")
+    }
+
+    // MARK: - Script execution
+
+    private func runScript(_ source: String) async -> ChannelResult {
+        // NSAppleScript must run on the main thread-ish context, but within
+        // an actor we are already serialized. The actual execution is synchronous.
+        var errorDict: NSDictionary?
+        let script = NSAppleScript(source: source)
+        let result = script?.executeAndReturnError(&errorDict)
+
+        if let error = errorDict {
+            let message = error[NSAppleScript.errorMessage] as? String ?? "Unknown AppleScript error"
+            let number = error[NSAppleScript.errorNumber] as? Int ?? -1
+            Log.error("AppleScript error \(number): \(message)", subsystem: "appleScript")
+            return .error("AppleScript error: \(message)")
+        }
+
+        let output = result?.stringValue ?? "OK"
+        return .success("{\"result\":\"\(escapeJSON(output))\"}")
+    }
+
+    // MARK: - Script templates
+
+    private func newProjectScript() -> String {
+        """
+        tell application "Logic Pro"
+            activate
+            delay 0.5
+        end tell
+        tell application "System Events"
+            tell process "Logic Pro"
+                click menu item "New..." of menu "File" of menu bar 1
+            end tell
+        end tell
+        """
+    }
+
+    private func openProjectScript(path: String) -> String {
+        let escaped = path.replacingOccurrences(of: "\"", with: "\\\"")
+        return """
+        tell application "Logic Pro"
+            activate
+            open POSIX file "\(escaped)"
+        end tell
+        """
+    }
+
+    private func closeProjectScript(saving: String) -> String {
+        let saveClause: String
+        switch saving.lowercased() {
+        case "no", "false":
+            saveClause = "saving no"
+        case "ask":
+            saveClause = "saving ask"
+        default:
+            saveClause = "saving yes"
+        }
+        return """
+        tell application "Logic Pro"
+            close front document \(saveClause)
+        end tell
+        """
+    }
+
+    private func saveProjectScript() -> String {
+        """
+        tell application "Logic Pro"
+            save front document
+        end tell
+        """
+    }
+
+    private func transportScript(action: String) -> String {
+        """
+        tell application "Logic Pro"
+            \(action)
+        end tell
+        """
+    }
+
+    // MARK: - Helpers
+
+    private func escapeJSON(_ string: String) -> String {
+        string
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
+    }
+}
