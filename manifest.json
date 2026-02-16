@@ -5,15 +5,15 @@
   "version": "0.1.0",
   "author": "Kolton Jacobs",
   "license": "MIT",
-  "homepage": "https://github.com/anthropics/logic-pro-mcp",
-  "repository": "https://github.com/anthropics/logic-pro-mcp",
+  "homepage": "https://github.com/koltyj/logic-pro-mcp",
+  "repository": "https://github.com/koltyj/logic-pro-mcp",
   "platforms": ["macos"],
   "runtime": "native",
   "installation": {
     "macos": {
       "command": "LogicProMCP",
       "args": [],
-      "download_url": "https://github.com/anthropics/logic-pro-mcp/releases/latest/download/LogicProMCP",
+      "download_url": "https://github.com/koltyj/logic-pro-mcp/releases/latest/download/LogicProMCP",
       "install_path": "/usr/local/bin/LogicProMCP"
     }
   },

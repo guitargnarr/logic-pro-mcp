@@ -59,12 +59,12 @@ Each command routes through the fastest available channel, with automatic fallba
 ### Quick Install (Script)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/anthropics/logic-pro-mcp/main/Scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/koltyj/logic-pro-mcp/main/Scripts/install.sh | bash
 ```
 
 ### Download Binary
 
-Grab the latest universal macOS binary from [GitHub Releases](https://github.com/anthropics/logic-pro-mcp/releases), then:
+Grab the latest universal macOS binary from [GitHub Releases](https://github.com/koltyj/logic-pro-mcp/releases), then:
 
 ```bash
 chmod +x LogicProMCP
@@ -76,7 +76,7 @@ sudo mv LogicProMCP /usr/local/bin/
 Requires Swift 6.0+ and macOS 14+.
 
 ```bash
-git clone https://github.com/anthropics/logic-pro-mcp.git
+git clone https://github.com/koltyj/logic-pro-mcp.git
 cd logic-pro-mcp
 swift build -c release
 # Binary at .build/release/LogicProMCP
