@@ -20,24 +20,36 @@ enum AXLogicProElements {
     // MARK: - Transport
 
     /// Find the transport bar area (toolbar/group containing play, stop, record, etc.)
+    /// Logic Pro 12 uses AXGroup with AXDescription="Control Bar" as a direct child of the window.
     static func getTransportBar() -> AXUIElement? {
         guard let window = mainWindow() else { return nil }
-        // Logic Pro's transport is typically an AXToolbar or AXGroup near the top
+        // Logic Pro 12: direct child AXGroup with desc="Control Bar"
+        if let bar = AXHelpers.findChild(of: window, role: kAXGroupRole, description: "Control Bar") {
+            return bar
+        }
+        // Legacy fallback: AXToolbar
         if let toolbar = AXHelpers.findChild(of: window, role: kAXToolbarRole) {
             return toolbar
         }
-        // Fallback: search for a group containing transport-like buttons
+        // Legacy fallback: AXGroup with identifier
         return AXHelpers.findDescendant(of: window, role: kAXGroupRole, identifier: "Transport")
     }
 
-    /// Find a specific transport button by its title or description.
+    /// Find a specific transport control by its title or description.
+    /// Logic Pro 12 uses AXCheckBox for toggle controls (Play, Record, Cycle, Metronome).
     static func findTransportButton(named name: String) -> AXUIElement? {
         guard let transport = getTransportBar() else { return nil }
-        // Try by title first
+        // Logic Pro 12: AXCheckBox with matching desc or title
+        if let cb = AXHelpers.findDescendant(of: transport, role: kAXCheckBoxRole, description: name, maxDepth: 4) {
+            return cb
+        }
+        if let cb = AXHelpers.findDescendant(of: transport, role: kAXCheckBoxRole, title: name, maxDepth: 4) {
+            return cb
+        }
+        // Legacy: AXButton
         if let button = AXHelpers.findDescendant(of: transport, role: kAXButtonRole, title: name) {
             return button
         }
-        // Try by description (some buttons use AXDescription instead of AXTitle)
         let buttons = AXHelpers.findAllDescendants(of: transport, role: kAXButtonRole, maxDepth: 4)
         for button in buttons {
             if AXHelpers.getDescription(button) == name {
@@ -50,13 +62,18 @@ enum AXLogicProElements {
     // MARK: - Tracks
 
     /// Find the track header area containing individual track rows.
+    /// Logic Pro 12 structure: AXGroup desc="Tracks header" inside an AXScrollArea,
+    /// containing AXLayoutItem children (one per track).
     static func getTrackHeaders() -> AXUIElement? {
         guard let window = mainWindow() else { return nil }
-        // Track headers are typically in a scrollable list/table area
+        // Logic Pro 12: AXGroup with desc="Tracks header" (recursive search)
+        if let area = AXHelpers.findDescendant(of: window, role: kAXGroupRole, description: "Tracks header") {
+            return area
+        }
+        // Legacy fallbacks for older Logic Pro versions
         if let area = AXHelpers.findDescendant(of: window, role: kAXListRole, identifier: "Track Headers") {
             return area
         }
-        // Fallback: look for an AXScrollArea containing AXRow or AXGroup children
         if let area = AXHelpers.findDescendant(of: window, role: kAXScrollAreaRole, identifier: "Tracks") {
             return area
         }
@@ -161,43 +178,51 @@ enum AXLogicProElements {
 
     // MARK: - Track Controls
 
-    /// Find the mute button on a track header.
+    /// Find the mute checkbox on a track header.
+    /// Logic Pro 12 uses AXCheckBox with desc="Mute".
     static func findTrackMuteButton(trackIndex: Int) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex) else { return nil }
-        return findButtonByDescriptionPrefix(in: header, prefix: "Mute")
-            ?? AXHelpers.findDescendant(of: header, role: kAXButtonRole, title: "M")
+        return findToggleByDescription(in: header, description: "Mute")
     }
 
-    /// Find the solo button on a track header.
+    /// Find the solo checkbox on a track header.
     static func findTrackSoloButton(trackIndex: Int) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex) else { return nil }
-        return findButtonByDescriptionPrefix(in: header, prefix: "Solo")
-            ?? AXHelpers.findDescendant(of: header, role: kAXButtonRole, title: "S")
+        return findToggleByDescription(in: header, description: "Solo")
     }
 
-    /// Find the record-arm button on a track header.
+    /// Find the record-arm checkbox on a track header.
+    /// Logic Pro 12 uses desc="Record Enable".
     static func findTrackArmButton(trackIndex: Int) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex) else { return nil }
-        return findButtonByDescriptionPrefix(in: header, prefix: "Record")
-            ?? AXHelpers.findDescendant(of: header, role: kAXButtonRole, title: "R")
+        return findToggleByDescription(in: header, description: "Record Enable")
+            ?? findToggleByDescription(in: header, description: "Record")
     }
 
     /// Find the track name text field on a header.
     static func findTrackNameField(trackIndex: Int) -> AXUIElement? {
         guard let header = findTrackHeader(at: trackIndex) else { return nil }
-        return AXHelpers.findDescendant(of: header, role: kAXStaticTextRole, maxDepth: 4)
-            ?? AXHelpers.findDescendant(of: header, role: kAXTextFieldRole, maxDepth: 4)
+        // Logic Pro 12: AXTextField with track name in desc attribute
+        return AXHelpers.findDescendant(of: header, role: kAXTextFieldRole, maxDepth: 4)
+            ?? AXHelpers.findDescendant(of: header, role: kAXStaticTextRole, maxDepth: 4)
     }
 
     // MARK: - Helpers
 
-    private static func findButtonByDescriptionPrefix(
-        in element: AXUIElement, prefix: String
+    /// Find a toggle control (AXCheckBox or AXButton) by exact AXDescription match.
+    /// Logic Pro 12 track controls are AXCheckBox; older versions may use AXButton.
+    private static func findToggleByDescription(
+        in element: AXUIElement, description: String
     ) -> AXUIElement? {
+        // Try AXCheckBox first (Logic Pro 12)
+        if let cb = AXHelpers.findDescendant(of: element, role: kAXCheckBoxRole, description: description, maxDepth: 4) {
+            return cb
+        }
+        // Fallback: AXButton with matching description prefix
         let buttons = AXHelpers.findAllDescendants(of: element, role: kAXButtonRole, maxDepth: 4)
         return buttons.first { button in
             guard let desc = AXHelpers.getDescription(button) else { return false }
-            return desc.hasPrefix(prefix)
+            return desc.hasPrefix(description)
         }
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 
 /// Sends OSC messages to Logic Pro over UDP using Network.framework.
 actor OSCClient {
@@ -21,17 +22,20 @@ actor OSCClient {
         let conn = NWConnection(host: host, port: port, using: params)
 
         let readyResult: Bool = await withCheckedContinuation { continuation in
+            // NWConnection state handler can fire multiple times (e.g. .ready then .cancelled
+            // on shutdown). A CheckedContinuation must only be resumed once.
+            let guard_ = OnceFlag()
             conn.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .ready:
                     Task { await self?.setReady(true) }
-                    continuation.resume(returning: true)
+                    if guard_.tryConsume() { continuation.resume(returning: true) }
                 case .failed(let error):
                     Log.error("OSCClient connection failed: \(error)", subsystem: "osc")
-                    continuation.resume(returning: false)
+                    if guard_.tryConsume() { continuation.resume(returning: false) }
                 case .cancelled:
                     Log.info("OSCClient connection cancelled", subsystem: "osc")
-                    continuation.resume(returning: false)
+                    if guard_.tryConsume() { continuation.resume(returning: false) }
                 default:
                     break
                 }

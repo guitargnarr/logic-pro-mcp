@@ -85,12 +85,19 @@ enum AXValueExtractors {
     }
 
     /// Read a track header and extract its basic state.
+    /// Logic Pro 12 track headers are AXLayoutItem elements containing:
+    ///   AXRadioButton desc="Has Focus" (selected state)
+    ///   AXCheckBox desc="Mute"/"Solo"/"Record Enable"/"Input Monitoring"
+    ///   AXButton desc="Track N \"name\"" (icon/click target)
+    ///   AXTextField desc="name" value=0 (name in desc, not value)
     static func extractTrackState(from header: AXUIElement, index: Int) -> TrackState {
         let name = extractTrackName(from: header)
-        let muted = extractTrackButtonState(from: header, prefix: "Mute") ?? false
-        let soloed = extractTrackButtonState(from: header, prefix: "Solo") ?? false
-        let armed = extractTrackButtonState(from: header, prefix: "Record") ?? false
-        let selected = extractSelectedState(header) ?? false
+        let muted = extractToggleState(from: header, description: "Mute") ?? false
+        let soloed = extractToggleState(from: header, description: "Solo") ?? false
+        let armed = extractToggleState(from: header, description: "Record Enable")
+            ?? extractToggleState(from: header, description: "Record")
+            ?? false
+        let selected = extractHasFocus(from: header) ?? false
         let trackType = inferTrackType(from: header)
 
         return TrackState(
@@ -108,45 +115,86 @@ enum AXValueExtractors {
     }
 
     /// Read transport bar elements and build a TransportState.
+    /// Logic Pro 12 transport uses AXCheckBox for Play/Record/Cycle/Metronome (not AXButton),
+    /// AXSlider for Tempo/bar/beat/division/tick (not AXStaticText).
     static func extractTransportState(from transport: AXUIElement) -> TransportState {
         var state = TransportState()
 
-        // Find and read transport button states
-        let buttons = AXHelpers.findAllDescendants(of: transport, role: kAXButtonRole, maxDepth: 4)
-        for button in buttons {
-            let desc = AXHelpers.getDescription(button) ?? AXHelpers.getTitle(button) ?? ""
-            let pressed = extractButtonState(button) ?? false
+        // Logic Pro 12: transport toggles are AXCheckBox with value 0/1
+        let checkboxes = AXHelpers.findAllDescendants(of: transport, role: kAXCheckBoxRole, maxDepth: 4)
+        for cb in checkboxes {
+            let desc = AXHelpers.getDescription(cb) ?? AXHelpers.getTitle(cb) ?? ""
+            let pressed = extractCheckboxState(cb) ?? false
             let descLower = desc.lowercased()
 
-            if descLower.contains("play") {
+            if descLower == "play" {
                 state.isPlaying = pressed
-            } else if descLower.contains("record") && !descLower.contains("arm") {
+            } else if descLower == "record" {
                 state.isRecording = pressed
-            } else if descLower.contains("cycle") || descLower.contains("loop") {
+            } else if descLower == "cycle" {
                 state.isCycleEnabled = pressed
             } else if descLower.contains("metronome") || descLower.contains("click") {
                 state.isMetronomeEnabled = pressed
             }
         }
 
-        // Find text fields for tempo, position
+        // Legacy fallback: some versions use AXButton
+        if !checkboxes.contains(where: { (AXHelpers.getDescription($0) ?? "").lowercased() == "play" }) {
+            let buttons = AXHelpers.findAllDescendants(of: transport, role: kAXButtonRole, maxDepth: 4)
+            for button in buttons {
+                let desc = AXHelpers.getDescription(button) ?? AXHelpers.getTitle(button) ?? ""
+                let pressed = extractButtonState(button) ?? false
+                let descLower = desc.lowercased()
+
+                if descLower.contains("play") { state.isPlaying = pressed }
+                else if descLower.contains("record") && !descLower.contains("arm") { state.isRecording = pressed }
+                else if descLower.contains("cycle") || descLower.contains("loop") { state.isCycleEnabled = pressed }
+                else if descLower.contains("metronome") || descLower.contains("click") { state.isMetronomeEnabled = pressed }
+            }
+        }
+
+        // Logic Pro 12: tempo and position are AXSlider elements
+        let sliders = AXHelpers.findAllDescendants(of: transport, role: kAXSliderRole, maxDepth: 4)
+        var bar: Int?, beat: Int?, division: Int?, tick: Int?
+        for slider in sliders {
+            let desc = AXHelpers.getDescription(slider)?.lowercased() ?? ""
+            if let value = extractSliderValue(slider) {
+                switch desc {
+                case "tempo":
+                    state.tempo = value
+                case "bar":
+                    bar = Int(value)
+                case "beat":
+                    beat = Int(value)
+                case "division":
+                    division = Int(value)
+                case "tick":
+                    tick = Int(value)
+                default:
+                    break
+                }
+            }
+        }
+
+        // Build position string from slider components
+        if let b = bar, let bt = beat, let d = division, let t = tick {
+            state.position = "\(b).\(bt).\(d).\(t)"
+        }
+
+        // Legacy fallback: text-based position/tempo
         let texts = AXHelpers.findAllDescendants(of: transport, role: kAXStaticTextRole, maxDepth: 4)
         for text in texts {
             guard let value = extractTextValue(text) else { continue }
             let desc = AXHelpers.getDescription(text) ?? ""
             let descLower = desc.lowercased()
 
-            if descLower.contains("tempo") || descLower.contains("bpm") {
+            if state.tempo == 0, descLower.contains("tempo") || descLower.contains("bpm") {
                 if let tempo = Double(value.replacingOccurrences(of: " BPM", with: "")) {
                     state.tempo = tempo
                 }
-            } else if descLower.contains("position") || value.contains(".") && value.contains(":") == false {
-                // Bar.Beat.Division.Tick format
-                if value.filter({ $0 == "." }).count >= 2 {
-                    state.position = value
-                }
+            } else if state.position == "1.1.1.1", value.filter({ $0 == "." }).count >= 2 {
+                state.position = value
             } else if value.contains(":") {
-                // Time format HH:MM:SS
                 state.timePosition = value
             }
         }
@@ -158,28 +206,60 @@ enum AXValueExtractors {
     // MARK: - Private helpers
 
     private static func extractTrackName(from header: AXUIElement) -> String {
-        // Try static text first
+        // Logic Pro 12: AXTextField has the track name in its AXDescription attribute,
+        // NOT in AXValue (which is 0). Try desc first.
+        if let field = AXHelpers.findDescendant(of: header, role: kAXTextFieldRole, maxDepth: 3) {
+            if let desc = AXHelpers.getDescription(field), !desc.isEmpty {
+                return desc
+            }
+            if let name = extractTextValue(field), !name.isEmpty, name != "0" {
+                return name
+            }
+        }
+        // Try static text
         if let text = AXHelpers.findDescendant(of: header, role: kAXStaticTextRole, maxDepth: 3),
            let name = extractTextValue(text), !name.isEmpty {
             return name
         }
-        // Try text field
-        if let field = AXHelpers.findDescendant(of: header, role: kAXTextFieldRole, maxDepth: 3),
-           let name = extractTextValue(field), !name.isEmpty {
-            return name
+        // Fallback: parse name from the header's own description (e.g. "Track 1 \"Audio 1\"")
+        if let desc = AXHelpers.getDescription(header) {
+            if let start = desc.firstIndex(of: "\u{201C}") ?? desc.firstIndex(of: "\""),
+               let end = desc.lastIndex(of: "\u{201D}") ?? desc.lastIndex(of: "\""),
+               start < end {
+                let nameStart = desc.index(after: start)
+                return String(desc[nameStart..<end])
+            }
         }
         return AXHelpers.getTitle(header) ?? "Untitled"
     }
 
-    private static func extractTrackButtonState(from header: AXUIElement, prefix: String) -> Bool? {
+    /// Extract toggle state from an AXCheckBox (Logic Pro 12) or AXButton by exact description.
+    private static func extractToggleState(from header: AXUIElement, description: String) -> Bool? {
+        // Logic Pro 12: track controls are AXCheckBox with exact desc match
+        if let cb = AXHelpers.findDescendant(of: header, role: kAXCheckBoxRole, description: description, maxDepth: 4) {
+            return extractCheckboxState(cb) ?? extractButtonState(cb)
+        }
+        // Legacy fallback: AXButton with description prefix
         let buttons = AXHelpers.findAllDescendants(of: header, role: kAXButtonRole, maxDepth: 4)
         for button in buttons {
             let desc = AXHelpers.getDescription(button) ?? AXHelpers.getTitle(button) ?? ""
-            if desc.hasPrefix(prefix) || desc.lowercased().contains(prefix.lowercased()) {
+            if desc.hasPrefix(description) || desc.lowercased().contains(description.lowercased()) {
                 return extractButtonState(button)
             }
         }
         return nil
+    }
+
+    /// Extract "Has Focus" (selected) state from an AXRadioButton in the track header.
+    /// Logic Pro 12 uses AXRadioButton desc="Has Focus" with value 0/1 instead of kAXSelectedAttribute.
+    private static func extractHasFocus(from header: AXUIElement) -> Bool? {
+        if let radio = AXHelpers.findDescendant(of: header, role: kAXRadioButtonRole, description: "Has Focus", maxDepth: 4) {
+            if let value = AXHelpers.getValue(radio) as? NSNumber {
+                return value.intValue != 0
+            }
+        }
+        // Legacy fallback
+        return extractSelectedState(header)
     }
 
     private static func inferTrackType(from header: AXUIElement) -> TrackType {
