@@ -60,6 +60,7 @@ actor ChannelRouter {
         // MIDI — CoreMIDI only
         "midi.send_note":             [.coreMIDI],
         "midi.send_chord":            [.coreMIDI],
+        "midi.send_sequence":         [.coreMIDI],
         "midi.send_cc":               [.coreMIDI],
         "midi.send_program_change":   [.coreMIDI],
         "midi.send_pitch_bend":       [.coreMIDI],

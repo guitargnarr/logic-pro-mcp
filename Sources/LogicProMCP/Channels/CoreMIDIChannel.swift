@@ -76,6 +76,116 @@ actor CoreMIDIChannel: Channel {
             await engine.sendNoteOff(channel: channel, note: note)
             return .success("Note \(note) on ch \(channel) vel \(velocity) dur \(durationMs)ms")
 
+        case "midi.send_chord":
+            // Parse comma-separated notes
+            guard let notesStr = params["notes"], !notesStr.isEmpty else {
+                return .error("send_chord requires 'notes' (comma-separated MIDI note numbers)")
+            }
+            let chordNotes = notesStr.split(separator: ",").compactMap { UInt8($0.trimmingCharacters(in: .whitespaces)) }
+            guard !chordNotes.isEmpty else {
+                return .error("send_chord: no valid note numbers in '\(notesStr)'")
+            }
+            let chordChannel = params["channel"].flatMap(UInt8.init) ?? 0
+            let chordVelocity = params["velocity"].flatMap(UInt8.init) ?? 100
+            let chordDurationMs = params["duration_ms"].flatMap(UInt64.init) ?? 500
+            // All notes on simultaneously
+            for n in chordNotes {
+                await engine.sendNoteOn(channel: chordChannel, note: n, velocity: chordVelocity)
+            }
+            try? await Task.sleep(nanoseconds: chordDurationMs * 1_000_000)
+            // All notes off simultaneously
+            for n in chordNotes {
+                await engine.sendNoteOff(channel: chordChannel, note: n)
+            }
+            return .success("Chord [\(chordNotes.map(String.init).joined(separator: ","))] on ch \(chordChannel) vel \(chordVelocity) dur \(chordDurationMs)ms")
+
+        case "midi.send_sequence":
+            // Parse JSON-encoded sequence of timed events
+            // Format: events is a JSON array string, each element:
+            //   {"type":"note","note":60,"velocity":100,"channel":0,"duration_ms":250,"time_ms":0}
+            //   {"type":"chord","notes":[60,64,67],"velocity":100,"channel":0,"duration_ms":500,"time_ms":1000}
+            //   {"type":"rest","duration_ms":250,"time_ms":500}
+            //   {"type":"cc","controller":1,"value":127,"channel":0,"time_ms":0}
+            guard let eventsJSON = params["events"] else {
+                return .error("send_sequence requires 'events' (JSON array of timed events)")
+            }
+            guard let eventsData = eventsJSON.data(using: .utf8),
+                  let events = try? JSONSerialization.jsonObject(with: eventsData) as? [[String: Any]] else {
+                return .error("send_sequence: 'events' must be a valid JSON array")
+            }
+            guard !events.isEmpty else {
+                return .error("send_sequence: events array is empty")
+            }
+
+            let seqChannel = params["channel"].flatMap(UInt8.init) ?? 0
+            var eventsPlayed = 0
+            var lastTimeMs: UInt64 = 0
+
+            // Sort events by time_ms for correct ordering
+            let sorted = events.sorted { ($0["time_ms"] as? UInt64 ?? 0) < ($1["time_ms"] as? UInt64 ?? 0) }
+
+            for event in sorted {
+                let eventType = event["type"] as? String ?? "note"
+                let timeMs = event["time_ms"] as? UInt64
+                    ?? (event["time_ms"] as? Int).map(UInt64.init) ?? 0
+
+                // Sleep until this event's scheduled time
+                if timeMs > lastTimeMs {
+                    let delta = timeMs - lastTimeMs
+                    try? await Task.sleep(nanoseconds: delta * 1_000_000)
+                }
+                lastTimeMs = timeMs
+
+                let ch = (event["channel"] as? Int).map(UInt8.init) ?? seqChannel
+
+                switch eventType {
+                case "note":
+                    let note = UInt8(event["note"] as? Int ?? 60)
+                    let vel = UInt8(event["velocity"] as? Int ?? 100)
+                    let dur = UInt64(event["duration_ms"] as? Int ?? 250)
+                    await engine.sendNoteOn(channel: ch, note: note, velocity: vel)
+                    try? await Task.sleep(nanoseconds: dur * 1_000_000)
+                    await engine.sendNoteOff(channel: ch, note: note)
+                    // Advance lastTimeMs by the note duration so next event timing is relative to note end
+                    lastTimeMs += dur
+                    eventsPlayed += 1
+
+                case "chord":
+                    let notes: [Int] = event["notes"] as? [Int] ?? []
+                    let vel = UInt8(event["velocity"] as? Int ?? 100)
+                    let dur = UInt64(event["duration_ms"] as? Int ?? 500)
+                    for n in notes {
+                        await engine.sendNoteOn(channel: ch, note: UInt8(n), velocity: vel)
+                    }
+                    try? await Task.sleep(nanoseconds: dur * 1_000_000)
+                    for n in notes {
+                        await engine.sendNoteOff(channel: ch, note: UInt8(n))
+                    }
+                    lastTimeMs += dur
+                    eventsPlayed += 1
+
+                case "rest":
+                    let dur = UInt64(event["duration_ms"] as? Int ?? 250)
+                    try? await Task.sleep(nanoseconds: dur * 1_000_000)
+                    lastTimeMs += dur
+
+                case "cc":
+                    let controller = UInt8(event["controller"] as? Int ?? 0)
+                    let value = UInt8(event["value"] as? Int ?? 0)
+                    await engine.sendCC(channel: ch, controller: controller, value: value)
+                    eventsPlayed += 1
+
+                case "program_change":
+                    let program = UInt8(event["program"] as? Int ?? 0)
+                    await engine.sendProgramChange(channel: ch, program: program)
+                    eventsPlayed += 1
+
+                default:
+                    Log.warn("send_sequence: unknown event type '\(eventType)', skipping", subsystem: "midi")
+                }
+            }
+            return .success("Sequence complete: \(eventsPlayed) events played over \(lastTimeMs)ms")
+
         case "midi.note_on":
             guard let note = params["note"].flatMap(UInt8.init) else {
                 return .error("note_on requires 'note' (0-127)")

@@ -6,12 +6,13 @@ struct MIDIDispatcher {
         name: "logic_midi",
         description: """
             MIDI operations in Logic Pro. \
-            Commands: send_note, send_chord, send_cc, send_program_change, \
+            Commands: send_note, send_chord, send_sequence, send_cc, send_program_change, \
             send_pitch_bend, send_aftertouch, send_sysex, \
             create_virtual_port, mmc_play, mmc_stop, mmc_record, mmc_locate. \
             Params by command: \
             send_note -> { note: Int, velocity: Int, channel: Int, duration_ms: Int }; \
             send_chord -> { notes: [Int], velocity: Int, channel: Int, duration_ms: Int }; \
+            send_sequence -> { events: [{type, note/notes, velocity, channel, duration_ms, time_ms}], channel: Int }; \
             send_cc -> { controller: Int, value: Int, channel: Int }; \
             send_program_change -> { program: Int, channel: Int }; \
             send_pitch_bend -> { value: Int, channel: Int } (-8192 to 8191); \
@@ -80,6 +81,48 @@ struct MIDIDispatcher {
                 ]
             )
             return CallTool.Result(content: [.text(result.message)], isError: !result.isSuccess)
+
+        case "send_sequence":
+            // Accept events as a JSON array (already a Value array from MCP)
+            let eventsJSON: String
+            if let arr = params["events"]?.arrayValue {
+                // Convert MCP Value array back to JSON string for CoreMIDIChannel
+                var jsonEvents: [[String: Any]] = []
+                for item in arr {
+                    // Each item should be an object -- extract fields
+                    if case .object(let obj) = item {
+                        var dict: [String: Any] = [:]
+                        for (k, v) in obj {
+                            if let i = v.intValue { dict[k] = i }
+                            else if let d = v.doubleValue { dict[k] = Int(d) }
+                            else if let s = v.stringValue { dict[k] = s }
+                            else if let a = v.arrayValue {
+                                dict[k] = a.compactMap { $0.intValue ?? $0.doubleValue.map(Int.init) }
+                            }
+                        }
+                        jsonEvents.append(dict)
+                    }
+                }
+                if let data = try? JSONSerialization.data(withJSONObject: jsonEvents),
+                   let str = String(data: data, encoding: .utf8) {
+                    eventsJSON = str
+                } else {
+                    eventsJSON = "[]"
+                }
+            } else if let str = params["events"]?.stringValue {
+                eventsJSON = str
+            } else {
+                eventsJSON = "[]"
+            }
+            let seqChannel = params["channel"]?.intValue ?? 1
+            let seqResult = await router.route(
+                operation: "midi.send_sequence",
+                params: [
+                    "events": eventsJSON,
+                    "channel": String(seqChannel),
+                ]
+            )
+            return CallTool.Result(content: [.text(seqResult.message)], isError: !seqResult.isSuccess)
 
         case "send_cc":
             let controller = params["controller"]?.intValue ?? 0
@@ -174,7 +217,7 @@ struct MIDIDispatcher {
 
         default:
             return CallTool.Result(
-                content: [.text("Unknown MIDI command: \(command). Available: send_note, send_chord, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, create_virtual_port, mmc_play, mmc_stop, mmc_record, mmc_locate")],
+                content: [.text("Unknown MIDI command: \(command). Available: send_note, send_chord, send_sequence, send_cc, send_program_change, send_pitch_bend, send_aftertouch, send_sysex, create_virtual_port, mmc_play, mmc_stop, mmc_record, mmc_locate")],
                 isError: true
             )
         }
