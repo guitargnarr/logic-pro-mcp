@@ -7,3 +7,301 @@ DerivedData/
 .netrc
 *.xcodeproj
 Package.resolved
+
+
+# === Portfolio Template (auto-merged) ===
+# =============================================================================
+# GLOBAL .GITIGNORE TEMPLATE
+# Source: 84-repo audit (2026-03-25)
+# Apply to every new project. Prevents the recurring patterns found across
+# the entire guitargnarr portfolio.
+# =============================================================================
+
+# === Environment & Secrets ===
+.env
+.env.*
+.env.local
+.env.production
+.env.staging
+.env.DISABLED
+*.env
+
+# === Claude Code / AI Session Artifacts ===
+CLAUDE.md
+CLAUDE.md.backup*
+.claude/
+ULTRATHINK*.md
+CONTEXT_EXPORT*.md
+SESSION_SAVE*.md
+SESSION_DIRECTIVE.md
+PARALLEL_VALIDATION_PLAN.md
+CLAUDE_CONTEXT.md
+HANDOFF.md
+ACTIVE_SESSIONS.md
+NEXT_SESSION.md
+DAY_*_STATUS.md
+WEEK*_CHECKLIST.md
+
+# === Verification Screenshots (local dev) ===
+verify-*.png
+local-verify*.png
+screenshot*.png
+mobile-test.png
+
+# === OS Files ===
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+venv/
+.venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.whl
+
+# === Node / JavaScript / TypeScript ===
+node_modules/
+.vite/
+dist/
+.next/
+.nuxt/
+.output/
+.turbo/
+*.tsbuildinfo
+
+# === Test Artifacts ===
+test-results/
+playwright-report/
+test_output.txt
+test_results.txt
+coverage/
+.nyc_output/
+*.last-run.json
+
+# === Build Artifacts ===
+out/
+*.mp4
+*.avi
+*.mov
+lint_output.txt
+
+# === LaTeX Build Artifacts ===
+*.aux
+*.out
+*.toc
+*.log
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# === IDE / Editor ===
+.idea/
+.vscode/settings.json
+*.sublime-project
+*.sublime-workspace
+
+# === Xcode / Swift ===
+*.xcuserstate
+*.xcworkspacedata
+
+# === Binary Outputs (should use CDN/object storage) ===
+# Uncomment if your project generates these:
+# *.pdf
+# *.pptx
+# *.docx
+
+# === Vercel / Deploy Config ===
+.vercel/project.json
+
+# === Disabled / Backup Files ===
+*.DISABLED
+*.backup.*
+*_old.*
+*_backup.*
+
+# === Operational Logs ===
+automation_results_*.json
+*_proof_summary.txt
+*_status_report.json
+dashboard_data.json
+
+# === Portfolio Template (auto-merged) ===
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+test-results.json
+
+# Node
+npm-debug.log*
+
+# OS
+
+# IDE
+.vscode/
+
+# Environment
+
+# Session notes (private)
+*ULTRATHINK*.md
+*_ANALYSIS.md
+WEEK*.md
+.archive/
+.vercel
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+*.db
+*.sqlite
+*.sqlite3
+data/raw/
+data/processed/
+models/checkpoints/
+*.gguf
+*.bin
+*.safetensors
+logs/
+outputs/temp/
+outputs/cache/
+ENV/
+transfer_data.json
+*.json.backup
+test_data*.json
+*.tmp
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+.installed.cfg
+MANIFEST
+google-env/
+ml-env/
+ml_env/
+.tox/
+.hypothesis/
+*.cover
+.coverage.*
+coverage.xml
+.env.*.local
+!.env.example
+credentials.json
+token.json
+token.pickle
+*.pem
+*.key
+*.cert
+*.crt
+!test_*.db
+data/
+output/
+resumes/*.pdf
+!resumes/sample.pdf
+applications/
+email_logs/
+bcc_tracking_log.json
+*.temp
+*.bak
+*.backup
+*.old
+tmp/
+temp/
+docs/_build/
+docs/.doctrees/
+MASTER_TRACKER.db
+UNIFIED_AI_JOBS.db
+job_applications.db
+gmail_job_tracker.db
+ai_talent_optimizer.db
+unified_talent_optimizer.db
+principal_jobs_400k.db
+verified_metrics.db
+your_profile.db
+ceo_outreach.db
+*.db-journal
+*.db-wal
+*.db-shm
+daily_summaries/
+mirador-memory/
+outputs/
+applications_sent/
+healthcare_mes[DAUGHTER]s/
+ready_to_send_mes[DAUGHTER]s/
+database_backups_*/
+sessions/
+backups/
+ceo_emails/
+automation.log
+unified_ai_hunter.log
+gmail_*_report_*.json
+*_report_*.json
+*_report_*.csv
+*_report_*.html
+mes[DAUGHTER]_history.csv
+manual_applications_log.txt
+results.log
+job_scraper_integration.log
+ceo_outreach_log.txt
+MASTER_TRACKER_*.csv
+healthcare_power_network.csv
+healthcare_power_network.html
+*_local.json
+*_override.json
+unified_config.json
+ab_testing_config.json
+authentic_config.json
+followup_config.json
+company_research.json
+consolidation_report.json
+system_fix_report.json
+database_migration_report.json
+database_consolidation_analysis.json
+test_reports/
+test_results/
+.mutmut-cache
+.dmypy.json
+dmypy.json
+last_job_description.txt
+
+# === EMERGENCY SECURITY ADDITIONS ===
+*.env.*
+.env*
+*_credentials*
+*_secrets*
+*password*
+*token*
+*api_key*
+*.p12
+*.pfx
+*personal*
+*private*
+*confidential*
+*PII*
+*backup*
+*.orig
+desktop.ini
+yarn-debug.log*
+yarn-error.log*
+unified_platform.db
+sanitization_report*.md
