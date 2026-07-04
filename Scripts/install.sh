@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="koltyj/logic-pro-mcp"
+REPO="guitargnarr/logic-pro-mcp"
 BINARY_NAME="LogicProMCP"
 INSTALL_DIR="/usr/local/bin"
 
