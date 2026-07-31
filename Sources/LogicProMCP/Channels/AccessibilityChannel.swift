@@ -244,33 +244,70 @@ actor AccessibilityChannel: Channel {
         guard let field = AXLogicProElements.findTrackNameField(trackIndex: index) else {
             return .error("Cannot find name field for track \(index)")
         }
-        // Refuse early if the field will not accept a value — otherwise this
-        // reports success while changing nothing (Logic exposes most track
-        // name fields as read-only via AX).
-        var settable: DarwinBoolean = false
-        AXUIElementIsAttributeSettable(field, kAXValueAttribute as CFString, &settable)
-        guard settable.boolValue else {
+        // The track-header name field is read-only via AX. Double-clicking it
+        // spawns a SEPARATE editor AXTextField which becomes the application's
+        // focused element and *is* settable. Target that, not the header field.
+        //
+        // AXPress does not open edit mode — a real mouse double-click is
+        // required, so the field must be scrolled into view.
+        guard let frame = AXHelpers.getFrame(field) else {
+            return .error("Cannot read frame for track \(index) name field")
+        }
+        guard frame.height > 0, frame.width > 0 else {
+            return .error("Track \(index) name field has zero size")
+        }
+        let screenHeight = CGDisplayBounds(CGMainDisplayID()).height
+        guard frame.midY > 0, frame.midY < screenHeight else {
             return .error(
-                "Track \(index) name field is not settable via AX "
-                + "(AXUIElementIsAttributeSettable == false). Rename it in the UI, "
-                + "or use a channel that can drive an edit session."
+                "Track \(index) name field is off-screen (y=\(Int(frame.midY))). "
+                + "Scroll it into view before renaming."
             )
         }
 
-        // Enter edit mode, set the value, confirm.
-        AXHelpers.performAction(field, kAXPressAction)
-        let didSet = AXHelpers.setAttribute(field, kAXValueAttribute, name as CFTypeRef)
-        AXHelpers.performAction(field, kAXConfirmAction)
-        guard didSet else {
-            return .error("AXUIElementSetAttributeValue failed for track \(index)")
+        guard let pid = ProcessUtils.logicProPID() else {
+            return .error("Logic Pro is not running")
+        }
+        let appElement = AXHelpers.axApp(pid: pid)
+        // Logic carries the track name in AXDescription on the header field;
+        // AXValue is a selection flag (0/1), not the text.
+        let originalName = AXHelpers.getDescription(field)
+
+        AXHelpers.doubleClick(at: CGPoint(x: frame.midX, y: frame.midY))
+
+        // Poll briefly for the editor overlay to take focus.
+        var editor: AXUIElement?
+        for _ in 0..<20 {
+            usleep(50_000)
+            guard let focused = AXHelpers.focusedElement(ofApp: appElement) else { continue }
+            if AXHelpers.getRole(focused) == kAXTextFieldRole,
+               AXHelpers.isSettable(focused, kAXValueAttribute) {
+                editor = focused
+                break
+            }
+        }
+        guard let editor else {
+            return .error(
+                "Edit mode did not open for track \(index) — no settable text field "
+                + "took focus after double-click"
+            )
         }
 
-        // Verify by read-back: never report success on an unconfirmed write.
-        let actual = AXHelpers.getValue(field) as? String
+        guard AXHelpers.setAttribute(editor, kAXValueAttribute, name as CFTypeRef) else {
+            AXHelpers.performAction(editor, kAXCancelAction)
+            return .error("Could not write name into the editor for track \(index)")
+        }
+        AXHelpers.performAction(editor, kAXConfirmAction)
+        usleep(200_000)
+
+        // Verify against the header field — never report success unverified.
+        // Re-find it: the element reference can go stale across an edit session.
+        let verifyField = AXLogicProElements.findTrackNameField(trackIndex: index) ?? field
+        let actual = AXHelpers.getDescription(verifyField)
         guard actual == name else {
             return .error(
-                "Rename of track \(index) did not take — field still reads "
+                "Rename of track \(index) did not take — field reads "
                 + "\(actual.map { "\"\($0)\"" } ?? "nil")"
+                + (originalName.map { ", was \"\($0)\"" } ?? "")
             )
         }
         return .success("{\"track\":\(index),\"name\":\"\(name)\"}")

@@ -26,6 +26,68 @@ enum AXHelpers {
         return result == .success
     }
 
+    /// Whether an attribute can actually be written on this element.
+    /// Logic exposes many controls as read-only; writing them silently no-ops.
+    static func isSettable(_ element: AXUIElement, _ attribute: String) -> Bool {
+        var settable: DarwinBoolean = false
+        let result = AXUIElementIsAttributeSettable(element, attribute as CFString, &settable)
+        return result == .success && settable.boolValue
+    }
+
+    /// Screen frame of an AX element, in global (top-left origin) coordinates.
+    static func getFrame(_ element: AXUIElement) -> CGRect? {
+        guard let posValue: AXValue = getAttribute(element, kAXPositionAttribute),
+              let sizeValue: AXValue = getAttribute(element, kAXSizeAttribute) else {
+            return nil
+        }
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(posValue, .cgPoint, &origin),
+              AXValueGetValue(sizeValue, .cgSize, &size) else {
+            return nil
+        }
+        return CGRect(origin: origin, size: size)
+    }
+
+    /// The application's currently focused UI element, if any.
+    static func focusedElement(ofApp app: AXUIElement) -> AXUIElement? {
+        guard let focused: AXUIElement = getAttribute(app, kAXFocusedUIElementAttribute) else {
+            return nil
+        }
+        return focused
+    }
+
+    /// Synthesize a double-click at a screen point.
+    ///
+    /// Needed because some Logic fields only spawn an editable overlay on a
+    /// real mouse double-click — AXPress alone does not open edit mode.
+    ///
+    /// Posts to the HID event tap rather than `postToPid`, and warps the cursor
+    /// first: Logic hit-tests against the actual pointer location, so events
+    /// delivered to the process while the cursor sits elsewhere land on the
+    /// wrong element (or nothing at all).
+    @discardableResult
+    static func doubleClick(at point: CGPoint) -> Bool {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return false }
+        CGWarpMouseCursorPosition(point)
+        usleep(60_000)
+        for clickCount in 1...2 {
+            guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown,
+                                     mouseCursorPosition: point, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp,
+                                   mouseCursorPosition: point, mouseButton: .left) else {
+                return false
+            }
+            down.setIntegerValueField(.mouseEventClickState, value: Int64(clickCount))
+            up.setIntegerValueField(.mouseEventClickState, value: Int64(clickCount))
+            down.post(tap: .cghidEventTap)
+            usleep(20_000)
+            up.post(tap: .cghidEventTap)
+            usleep(60_000)
+        }
+        return true
+    }
+
     /// Get the children of an AX element.
     static func getChildren(_ element: AXUIElement) -> [AXUIElement] {
         guard let children: CFArray = getAttribute(element, kAXChildrenAttribute) else {
