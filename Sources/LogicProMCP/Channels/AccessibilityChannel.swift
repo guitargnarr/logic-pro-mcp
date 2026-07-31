@@ -244,10 +244,35 @@ actor AccessibilityChannel: Channel {
         guard let field = AXLogicProElements.findTrackNameField(trackIndex: index) else {
             return .error("Cannot find name field for track \(index)")
         }
-        // Double-click to enter edit mode, then set value
+        // Refuse early if the field will not accept a value — otherwise this
+        // reports success while changing nothing (Logic exposes most track
+        // name fields as read-only via AX).
+        var settable: DarwinBoolean = false
+        AXUIElementIsAttributeSettable(field, kAXValueAttribute as CFString, &settable)
+        guard settable.boolValue else {
+            return .error(
+                "Track \(index) name field is not settable via AX "
+                + "(AXUIElementIsAttributeSettable == false). Rename it in the UI, "
+                + "or use a channel that can drive an edit session."
+            )
+        }
+
+        // Enter edit mode, set the value, confirm.
         AXHelpers.performAction(field, kAXPressAction)
-        AXHelpers.setAttribute(field, kAXValueAttribute, name as CFTypeRef)
+        let didSet = AXHelpers.setAttribute(field, kAXValueAttribute, name as CFTypeRef)
         AXHelpers.performAction(field, kAXConfirmAction)
+        guard didSet else {
+            return .error("AXUIElementSetAttributeValue failed for track \(index)")
+        }
+
+        // Verify by read-back: never report success on an unconfirmed write.
+        let actual = AXHelpers.getValue(field) as? String
+        guard actual == name else {
+            return .error(
+                "Rename of track \(index) did not take — field still reads "
+                + "\(actual.map { "\"\($0)\"" } ?? "nil")"
+            )
+        }
         return .success("{\"track\":\(index),\"name\":\"\(name)\"}")
     }
 
