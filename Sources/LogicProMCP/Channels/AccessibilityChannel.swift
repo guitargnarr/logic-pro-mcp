@@ -236,45 +236,51 @@ actor AccessibilityChannel: Channel {
         return .success("{\"track\":\(index),\"toggled\":\"\(buttonName)\"}")
     }
 
-    private func renameTrack(params: [String: String]) -> ChannelResult {
-        guard let indexStr = params["index"], let index = Int(indexStr),
-              let name = params["name"] else {
-            return .error("Missing 'index' or 'name' parameter")
+    /// Write text into a Logic label that is read-only via AX.
+    ///
+    /// Logic's inline labels (track names, and by inspection marker and region
+    /// names) expose their text in `AXDescription` and refuse writes to
+    /// `AXValue`. Double-clicking one spawns a SEPARATE editor `AXTextField`
+    /// which takes application focus and *is* settable — that overlay is the
+    /// real write target.
+    ///
+    /// Use this for any Logic inline-label edit rather than reimplementing it:
+    /// every step here exists because the naive version silently did nothing.
+    ///
+    /// - Parameters:
+    ///   - field: the read-only label element (not the editor)
+    ///   - newValue: text to write
+    ///   - label: human name for the target, used in error messages
+    ///   - reFind: re-locates the label for verification, since element
+    ///     references go stale across an edit session
+    private func editInlineLabel(
+        field: AXUIElement,
+        newValue: String,
+        label: String,
+        reFind: () -> AXUIElement?
+    ) -> ChannelResult {
+        guard let frame = AXHelpers.getFrame(field), frame.width > 0, frame.height > 0 else {
+            return .error("Cannot read a usable frame for \(label)")
         }
-        guard let field = AXLogicProElements.findTrackNameField(trackIndex: index) else {
-            return .error("Cannot find name field for track \(index)")
-        }
-        // The track-header name field is read-only via AX. Double-clicking it
-        // spawns a SEPARATE editor AXTextField which becomes the application's
-        // focused element and *is* settable. Target that, not the header field.
-        //
-        // AXPress does not open edit mode — a real mouse double-click is
-        // required, so the field must be scrolled into view.
-        guard let frame = AXHelpers.getFrame(field) else {
-            return .error("Cannot read frame for track \(index) name field")
-        }
-        guard frame.height > 0, frame.width > 0 else {
-            return .error("Track \(index) name field has zero size")
-        }
-        let screenHeight = CGDisplayBounds(CGMainDisplayID()).height
-        guard frame.midY > 0, frame.midY < screenHeight else {
+        // A synthesized click needs a real on-screen target; off-screen rows
+        // still report valid frames.
+        let screen = CGDisplayBounds(CGMainDisplayID())
+        guard frame.midY > 0, frame.midY < screen.height,
+              frame.midX > 0, frame.midX < screen.width else {
             return .error(
-                "Track \(index) name field is off-screen (y=\(Int(frame.midY))). "
-                + "Scroll it into view before renaming."
+                "\(label) is off-screen (x=\(Int(frame.midX)), y=\(Int(frame.midY))). "
+                + "Scroll it into view first."
             )
         }
-
         guard let pid = ProcessUtils.logicProPID() else {
             return .error("Logic Pro is not running")
         }
         let appElement = AXHelpers.axApp(pid: pid)
-        // Logic carries the track name in AXDescription on the header field;
-        // AXValue is a selection flag (0/1), not the text.
-        let originalName = AXHelpers.getDescription(field)
+        let original = AXHelpers.getDescription(field)
 
         AXHelpers.doubleClick(at: CGPoint(x: frame.midX, y: frame.midY))
 
-        // Poll briefly for the editor overlay to take focus.
+        // Poll for the editor overlay to take focus (~1s).
         var editor: AXUIElement?
         for _ in 0..<20 {
             usleep(50_000)
@@ -287,29 +293,44 @@ actor AccessibilityChannel: Channel {
         }
         guard let editor else {
             return .error(
-                "Edit mode did not open for track \(index) — no settable text field "
-                + "took focus after double-click"
+                "Edit mode did not open for \(label) — no settable text field took "
+                + "focus after double-click"
             )
         }
-
-        guard AXHelpers.setAttribute(editor, kAXValueAttribute, name as CFTypeRef) else {
+        guard AXHelpers.setAttribute(editor, kAXValueAttribute, newValue as CFTypeRef) else {
             AXHelpers.performAction(editor, kAXCancelAction)
-            return .error("Could not write name into the editor for track \(index)")
+            return .error("Could not write into the editor for \(label)")
         }
         AXHelpers.performAction(editor, kAXConfirmAction)
         usleep(200_000)
 
-        // Verify against the header field — never report success unverified.
-        // Re-find it: the element reference can go stale across an edit session.
-        let verifyField = AXLogicProElements.findTrackNameField(trackIndex: index) ?? field
-        let actual = AXHelpers.getDescription(verifyField)
-        guard actual == name else {
+        // Never report success unverified.
+        let actual = AXHelpers.getDescription(reFind() ?? field)
+        guard actual == newValue else {
             return .error(
-                "Rename of track \(index) did not take — field reads "
+                "Edit of \(label) did not take — reads "
                 + "\(actual.map { "\"\($0)\"" } ?? "nil")"
-                + (originalName.map { ", was \"\($0)\"" } ?? "")
+                + (original.map { ", was \"\($0)\"" } ?? "")
             )
         }
+        return .success("")
+    }
+
+    private func renameTrack(params: [String: String]) -> ChannelResult {
+        guard let indexStr = params["index"], let index = Int(indexStr),
+              let name = params["name"] else {
+            return .error("Missing 'index' or 'name' parameter")
+        }
+        guard let field = AXLogicProElements.findTrackNameField(trackIndex: index) else {
+            return .error("Cannot find name field for track \(index)")
+        }
+        let result = editInlineLabel(
+            field: field,
+            newValue: name,
+            label: "track \(index) name",
+            reFind: { AXLogicProElements.findTrackNameField(trackIndex: index) }
+        )
+        guard result.isSuccess else { return result }
         return .success("{\"track\":\(index),\"name\":\"\(name)\"}")
     }
 
