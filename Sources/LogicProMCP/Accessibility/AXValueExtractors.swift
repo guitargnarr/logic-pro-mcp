@@ -167,32 +167,34 @@ enum AXValueExtractors {
             }
         }
 
-        // Logic Pro 12: tempo and position are AXSlider elements
+        // Logic Pro 12: tempo and position are AXSlider elements. The LCD carries several
+        // bar/beat/division/tick groups in order: the playhead first, then the cycle locators
+        // (seen 2026-10-22: playhead 69.1.2.199, then 58.1.1.1 and 97.1.1.1). Each "bar" slider
+        // starts a new group; the first complete group is the playhead.
         let sliders = AXHelpers.findAllDescendants(of: transport, role: kAXSliderRole, maxDepth: 4)
-        var bar: Int?, beat: Int?, division: Int?, tick: Int?
+        var groups: [[String: Int]] = []
         for slider in sliders {
             let desc = AXHelpers.getDescription(slider)?.lowercased() ?? ""
-            if let value = extractSliderValue(slider) {
-                switch desc {
-                case "tempo":
-                    state.tempo = value
-                case "bar":
-                    bar = Int(value)
-                case "beat":
-                    beat = Int(value)
-                case "division":
-                    division = Int(value)
-                case "tick":
-                    tick = Int(value)
-                default:
-                    break
-                }
+            guard let value = extractSliderValue(slider) else { continue }
+            switch desc {
+            case "tempo":
+                state.tempo = value
+            case "bar":
+                groups.append(["bar": Int(value)])
+            case "beat", "division", "tick":
+                if !groups.isEmpty { groups[groups.count - 1][desc] = Int(value) }
+            default:
+                break
             }
         }
-
-        // Build position string from slider components
-        if let b = bar, let bt = beat, let d = division, let t = tick {
-            state.position = "\(b).\(bt).\(d).\(t)"
+        let positions = groups.compactMap { g -> String? in
+            guard let b = g["bar"], let bt = g["beat"], let d = g["division"], let t = g["tick"] else { return nil }
+            return "\(b).\(bt).\(d).\(t)"
+        }
+        if let first = positions.first { state.position = first }
+        if positions.count >= 3 {
+            state.cycleStart = positions[1]
+            state.cycleEnd = positions[2]
         }
 
         // Legacy fallback: text-based position/tempo

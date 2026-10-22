@@ -10,6 +10,8 @@ struct TransportState: Sendable, Codable {
     var tempo: Double = 120.0
     var position: String = "1.1.1.1"  // Bar.Beat.Division.Tick
     var timePosition: String = "00:00:00.000"
+    var cycleStart: String = ""  // the LCD's cycle locators, Bar.Beat.Division.Tick
+    var cycleEnd: String = ""
     var sampleRate: Int = 44100
     var lastUpdated: Date = .distantPast
 }
