@@ -22,7 +22,7 @@ actor ChannelRouter {
         "transport.toggle_metronome": [.cgEvent, .accessibility],
         "transport.set_tempo":        [.osc, .accessibility],
         "transport.get_state":        [.accessibility],
-        "transport.goto_position":    [.coreMIDI, .cgEvent],
+        "transport.goto_position":    [.accessibility, .coreMIDI, .cgEvent],
         "transport.set_cycle_range":  [.accessibility],
 
         // Track state reading
@@ -79,7 +79,7 @@ actor ChannelRouter {
         "mmc.pause":                  [.coreMIDI],
 
         // Navigation — keyboard primary, AX menu fallback
-        "nav.goto_bar":               [.cgEvent, .accessibility],
+        "nav.goto_bar":               [.accessibility, .cgEvent],
         "nav.goto_marker":            [.cgEvent, .accessibility],
         "nav.create_marker":          [.cgEvent],
         "nav.delete_marker":          [.cgEvent, .accessibility],
@@ -154,6 +154,14 @@ actor ChannelRouter {
     }
 
     func startAll() async {
+        // LOGICPRO_MCP_CHANNELS=Accessibility,CGEvent,AppleScript starts only those (no virtual MIDI ports, no OSC sockets)
+        if let only = ProcessInfo.processInfo.environment["LOGICPRO_MCP_CHANNELS"] {
+            let wanted = Set(only.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() })
+            for id in channels.keys where !wanted.contains(id.rawValue.lowercased()) {
+                channels.removeValue(forKey: id)
+                Log.info("Channel \(id.rawValue) left out by LOGICPRO_MCP_CHANNELS", subsystem: "router")
+            }
+        }
         for (id, channel) in channels {
             do {
                 try await channel.start()

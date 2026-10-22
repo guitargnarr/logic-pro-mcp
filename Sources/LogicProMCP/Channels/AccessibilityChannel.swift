@@ -44,6 +44,8 @@ actor AccessibilityChannel: Channel {
             return setTempo(params: params)
         case "transport.set_cycle_range":
             return setCycleRange(params: params)
+        case "nav.goto_bar", "transport.goto_position":
+            return gotoBar(params: params)
 
         // MARK: - Track reads
         case "track.get_tracks":
@@ -168,6 +170,26 @@ actor AccessibilityChannel: Channel {
             }
         }
         return .error("Cannot locate tempo field")
+    }
+
+    /// Locate by writing the LCD's position sliders (Logic Pro 12: AXSlider "bar"/"beat"/"division"/"tick").
+    private func gotoBar(params: [String: String]) -> ChannelResult {
+        guard let barStr = params["bar"], let bar = Int(barStr), bar >= 1 else {
+            return .error("Missing or invalid 'bar' parameter")
+        }
+        guard let transport = AXLogicProElements.getTransportBar() else {
+            return .error("Cannot locate transport bar")
+        }
+        let sliders = AXHelpers.findAllDescendants(of: transport, role: kAXSliderRole, maxDepth: 4)
+        var wrote = false
+        let wanted: [String: Int] = ["bar": bar, "beat": 1, "division": 1, "tick": 1]
+        for slider in sliders {
+            let desc = AXHelpers.getDescription(slider)?.lowercased() ?? ""
+            if let v = wanted[desc] {
+                if AXHelpers.setAttribute(slider, kAXValueAttribute, NSNumber(value: Double(v))) && desc == "bar" { wrote = true }
+            }
+        }
+        return wrote ? .success("{\"bar\":\(bar)}") : .error("Cannot locate the bar slider")
     }
 
     private func setCycleRange(params: [String: String]) -> ChannelResult {
