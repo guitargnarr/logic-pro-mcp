@@ -40,13 +40,17 @@ actor StatePoller {
 
     private func pollLoop(axChannel: AccessibilityChannel, cache: StateCache) async {
         var transportCounter: UInt64 = 0
+        let clock = ContinuousClock()
+        var nextTrackPoll = clock.now
 
         while !Task.isCancelled {
             let idle = await cache.timeSinceLastToolAccess()
             let interval: PollInterval = Self.intervalForIdleTime(idle)
 
             // Always poll transport (it changes most frequently)
+            let transportStart = clock.now
             await pollTransport(axChannel: axChannel, cache: cache)
+            let transportTook = clock.now - transportStart
             transportCounter += 1
 
             // Poll tracks/mixer less frequently.
@@ -60,13 +64,19 @@ actor StatePoller {
                 shouldPollTracks = true
             }
 
-            if shouldPollTracks {
+            // Duty-cycle cap: Logic answers every accessibility read on its main thread, and in Logic 13 a track walk can take
+            // longer than the poll interval, so the poller kept that thread busy nonstop (2026-11-16: Logic at ~100% CPU while
+            // stopped, 1.5-2.6 s per window read; 6% and 0.10 s with the poller paused). After each read, wait nine times as long
+            // as it took, which holds the poller to about 10% of Logic's main thread however slow Logic gets.
+            if shouldPollTracks && clock.now >= nextTrackPoll {
+                let trackStart = clock.now
                 await pollTracks(axChannel: axChannel, cache: cache)
+                nextTrackPoll = clock.now + (clock.now - trackStart) * 9
             }
 
             // Sleep until next poll
             do {
-                try await Task.sleep(nanoseconds: interval.nanoseconds)
+                try await Task.sleep(for: max(.nanoseconds(Int64(interval.nanoseconds)), transportTook * 9))
             } catch {
                 // Task was cancelled during sleep
                 break
